@@ -1,3 +1,12 @@
+config FP2_CAM_MODULE_DETECT
+	bool "Fairphone 2 camera module detection"
+	depends on MSMB_CAMERA
+	default y
+	---help---
+	  Detect the Fairphone 2 camera module from its EEPROM and hold
+	  back the flash drivers until it has been found. Say N on
+	  other devices, or the flash drivers will never probe.
+
 config MSM_CAMERA_SENSOR
 	    bool "Qualcomm MSM camera sensor support"
 	    depends on MSMB_CAMERA

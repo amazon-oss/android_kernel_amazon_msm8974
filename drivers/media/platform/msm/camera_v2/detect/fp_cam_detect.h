@@ -17,11 +17,13 @@ enum fp_cam_module_id {
 	FP_NO_CAM_MODULE,
 	FP_CAM_MODULE_1,
 	FP_CAM_MODULE_2,
+	FP_CAM_MODULE_GENERIC,
 };
 
 /**
  * Indicates which camera module has been detected.
  * FP_NO_CAM_MODULE in case module has not been set yet.
+ * FP_CAM_MODULE_GENERIC when detection is disabled.
  */
 extern enum fp_cam_module_id fp_cam_module;
 

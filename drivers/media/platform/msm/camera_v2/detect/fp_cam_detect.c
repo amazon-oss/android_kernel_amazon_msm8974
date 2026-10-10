@@ -17,7 +17,11 @@
 
 #include "fp_cam_detect.h"
 
+#ifdef CONFIG_FP2_CAM_MODULE_DETECT
 enum fp_cam_module_id fp_cam_module = FP_NO_CAM_MODULE;
+#else
+enum fp_cam_module_id fp_cam_module = FP_CAM_MODULE_GENERIC;
+#endif
 
 struct fp_cam_module_desc {
 	enum fp_cam_module_id module_id;
@@ -37,6 +41,9 @@ struct fp_cam_module_desc fp_cam_module_descs[] = {
 void fp_cam_module_set(const char *eeprom_name)
 {
 	int i;
+
+	if (!IS_ENABLED(CONFIG_FP2_CAM_MODULE_DETECT))
+		return;
 
 	if (fp_cam_module != FP_NO_CAM_MODULE)
 		pr_warn("%s: Camera module is set already: %d\n", __func__,
