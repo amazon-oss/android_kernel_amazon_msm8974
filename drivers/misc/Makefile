@@ -73,3 +73,5 @@ obj-$(CONFIG_QPNP_MISC) += qpnp-misc.o
 obj-$(CONFIG_UID_CPUTIME) += uid_cputime.o
 obj-$(CONFIG_TCMD_DRIVER) += tcmd_driver.o
 obj-$(CONFIG_TI_DRV2603) += ti_drv2603.o
+obj-$(CONFIG_IDME) += idme.o
+obj-$(CONFIG_SND_HEADSET_TS3A225E) += ts3a225e.o

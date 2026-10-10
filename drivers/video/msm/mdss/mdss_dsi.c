@@ -76,6 +76,11 @@ static int mdss_dsi_panel_power_on(struct mdss_panel_data *pdata, int enable)
 			goto error;
 		}
 
+		if (gpio_is_valid(ctrl_pdata->touch_rst_gpio)) {
+			gpio_set_value(ctrl_pdata->touch_rst_gpio, 1);
+			usleep(2000);
+		}
+
 		if (!pdata->panel_info.mipi.lp11_init) {
 			ret = mdss_dsi_panel_reset(pdata, 1);
 			if (ret) {
@@ -105,6 +110,9 @@ static int mdss_dsi_panel_power_on(struct mdss_panel_data *pdata, int enable)
 		        gpio_set_value(synaptics_touch_bdata->reset_gpio, synaptics_touch_bdata->reset_on_state);
                         msleep(synaptics_touch_bdata->reset_active_ms);
 		}
+
+		if (gpio_is_valid(ctrl_pdata->touch_rst_gpio))
+			gpio_set_value(ctrl_pdata->touch_rst_gpio, 0);
 
 		ret = msm_dss_enable_vreg(
 			ctrl_pdata->power_data.vreg_config,
@@ -1543,6 +1551,21 @@ int dsi_panel_device_register(struct device_node *pan_node,
 	if (!gpio_is_valid(ctrl_pdata->rst_gpio))
 		pr_err("%s:%d, reset gpio not specified\n",
 						__func__, __LINE__);
+
+	ctrl_pdata->touch_rst_gpio = of_get_named_gpio(ctrl_pdev->dev.of_node,
+			 "qcom,platform-touch-rst-gpio", 0);
+	if (gpio_is_valid(ctrl_pdata->touch_rst_gpio)) {
+		rc = gpio_request(ctrl_pdata->touch_rst_gpio, "disp_tch_rst_n");
+		if (rc) {
+			pr_err("request touch reset gpio failed, rc=%d\n", rc);
+			ctrl_pdata->touch_rst_gpio = -EINVAL;
+		} else {
+			rc = gpio_direction_output(ctrl_pdata->touch_rst_gpio, 1);
+			if (rc)
+				pr_err("set_direction for touch reset gpio failed, rc=%d\n",
+				       rc);
+		}
+	}
 
 	if (pinfo->mode_gpio_state != MODE_GPIO_NOT_VALID) {
 

@@ -13,6 +13,7 @@
 #define pr_fmt(fmt) "%s:%d " fmt, __func__, __LINE__
 
 #include <linux/module.h>
+#include <linux/firmware.h>
 #include <linux/ratelimit.h>
 #include "msm_sd.h"
 #include "msm_actuator.h"
@@ -36,9 +37,12 @@ static struct msm_actuator msm_vcm_actuator_table;
 static struct msm_actuator msm_piezo_actuator_table;
 
 static struct i2c_driver msm_actuator_i2c_driver;
+static struct msm_actuator msm_ois_actuator_table;
+
 static struct msm_actuator *actuators[] = {
 	&msm_vcm_actuator_table,
 	&msm_piezo_actuator_table,
+	&msm_ois_actuator_table,
 };
 
 static int32_t msm_actuator_piezo_set_default_focus(
@@ -207,6 +211,636 @@ static int32_t msm_actuator_init_focus(struct msm_actuator_ctrl_t *a_ctrl,
 	settings are written  */
 	a_ctrl->i2c_client.addr_type = save_addr_type;
 	CDBG("Exit\n");
+	return rc;
+}
+
+#define EEPROM_SID 0x50
+#define EEPROM_FACT_ADJ_START 0x0F20
+#define EEPROM_MODULE_ID 0x0021
+
+#define SCENE_REG_MAX 3
+#define SENSOR_MODULE_MAX 6
+
+#define RETURN_STATUS_CHECK(x) if ((rc = (x)) < 0) goto Error_Exit;
+
+static int32_t msm_actuator_ois_memory_read(
+	struct msm_camera_i2c_client *i2c_client,
+	uint8_t mem_addr,
+	uint16_t * data);
+
+enum OpCode {
+	OpCode_Prog = 0x80,
+	OpCode_Coeff = 0x88,
+	OpCode_Pheripheral_RW = 0x82,
+	OpCode_Memory_RW = 0x84
+};
+
+enum sensor_module_build_rev {
+	SENSOR_MODULE_REV_P1  = 0x10,
+	SENSOR_MODULE_REV_P2  = 0x20,
+	SENSOR_MODULE_REV_EVT = 0x30,
+	SENSOR_MODULE_REV_PRE_DVT = 0x35,
+	SENSOR_MODULE_REV_DVT = 0x60,
+	SENSOR_MODULE_REV_PVT = 0x70,
+};
+
+struct bu63164_module_fw_map_t {
+	enum sensor_module_build_rev rev;
+	const char *fw_name;
+	const char *coeff_name;
+};
+
+enum bu63164_fact_adj_item_type_t {
+	FactAdjItemType_Peripheral,
+	FactAdjItemType_Memory
+};
+
+struct bu63164_fact_adj_item_t{
+	uint8_t en; // Indicates whether or not this field should be used
+	uint16_t data;
+	uint16_t eerom_addr;
+	uint8_t ctrl_addr;
+	enum bu63164_fact_adj_item_type_t item_type;
+};
+
+
+enum bu63164_scene_param_t{
+
+	SCENE_PARAM_NIGHT1,
+	SCENE_PARAM_NIGHT2,
+	SCENE_PARAM_NIGHT3,
+
+	SCENE_PARAM_DAY1,
+	SCENE_PARAM_DAY2,
+	SCENE_PARAM_DAY3,
+
+	SCENE_PARAM_SPORT1,
+	SCENE_PARAM_SPORT2,
+	SCENE_PARAM_SPORT3,
+	SCENE_PARAM_TEST,
+
+	SCENE_PARAM_MAX
+};
+
+struct bu63164_scene_parameter_info_t{
+	uint8_t addr[SCENE_REG_MAX];
+	uint16_t data[SCENE_PARAM_MAX][SCENE_REG_MAX];
+};
+
+enum bu63164_fact_adj_item_name_t{
+	FactAdjName_CURDAT,
+	FactAdjName_HALOFS_X,
+	FactAdjName_HALOFS_Y,
+	FactAdjName_HX_OFS,
+	FactAdjName_HY_OFS,
+	FactAdjName_PSTXOF,
+	FactAdjName_PSTYOF,
+	FactAdjName_GX_OFS,
+	FactAdjName_GY_OFS,
+	FactAdjName_KgxHG,
+	FactAdjName_KgyHG,
+	FactAdjName_KGXG,
+	FactAdjName_KGYG,
+	FactAdjName_SFTHAL_X,
+	FactAdjName_SFTHAL_Y,
+	FactAdjName_TMP_X,
+	FactAdjName_TMP_Y,
+	FactAdjName_KgxH0,
+	FactAdjName_KgyH0,
+	FactAdjName_MAX
+};
+
+enum memory_address_t {
+	MemoryAddr_Kgx00 = 0x06,
+	MemoryAddr_Kgx09 = 0x10,
+	MemoryAddr_Kgx0A,
+	MemoryAddr_Kgx0B,
+	MemoryAddr_Kgx0C,
+	MemoryAddr_wDgx02,
+	MemoryAddr_Kgx0D = 0x18,
+	MemoryAddr_Kgx0E,
+	MemoryAddr_wDgx03 = 0x1C,
+	MemoryAddr_Kgxdr = 0x36,
+	MemoryAddr_Kgx13 = 0x3A,
+	MemoryAddr_Kgx14,
+	MemoryAddr_Kgx15,
+	MemoryAddr_wDgx06 = 0x3E,
+	MemoryAddr_X_LMT = 0x40,
+	MemoryAddr_X_TGT = 0x43,
+	MemoryAddr_DigGx = 0x55,
+	MemoryAddr_DigGy,
+	MemoryAddr_TMP_X = 0x6A,
+	MemoryAddr_TMP_Y,
+	MemoryAddr_CEFTYP = 0x76,
+	MemoryAddr_EQCTL = 0x7F,
+	MemoryAddr_Kgy00 = 0x86,
+	MemoryAddr_wDgy02 = 0x94,
+	MemoryAddr_wDgy03 = 0x9C,
+	MemoryAddr_Kgy13 = 0xBA,
+	MemoryAddr_Kgy14,
+	MemoryAddr_Kgy15,
+	MemoryAddr_wDgy06 = 0xBE,
+	MemoryAddr_FIRMVER = 0xF6,
+	MemoryAddr_OIS_STS = 0xF7,
+	MemoryAddr_X_MAX
+};
+
+static struct bu63164_module_fw_map_t ModuleFwMap[SENSOR_MODULE_MAX] = {
+	{SENSOR_MODULE_REV_P1, "bu63164.prog", "bu63164.coeff"},
+	{SENSOR_MODULE_REV_P2, "bu63164.prog", "bu63164.coeff"},
+	{SENSOR_MODULE_REV_EVT, "bu63164.prog", "bu63164.coeff"},
+	{SENSOR_MODULE_REV_PRE_DVT, "bu63164.prog", "bu63164.coeff"},
+	{SENSOR_MODULE_REV_DVT, "bu63164.prog", "bu63164.coeff"},
+	{SENSOR_MODULE_REV_PVT, "bu63164.prog", "bu63164.coeff"},
+};
+
+static struct bu63164_fact_adj_item_t FactoryAdjData[FactAdjName_MAX] = {
+	{1, 0, 0xF20, 0x30, FactAdjItemType_Peripheral},
+	{1, 0, 0xF22, 0x31, FactAdjItemType_Peripheral},
+	{1, 0, 0xF24, 0x32, FactAdjItemType_Peripheral},
+	{1, 0, 0xF26, 0x1E, FactAdjItemType_Memory},
+	{1, 0, 0xF28, 0x9E, FactAdjItemType_Memory},
+	{1, 0, 0xF2A, 0x39, FactAdjItemType_Peripheral},
+	{1, 0, 0xF2C, 0x3B, FactAdjItemType_Peripheral},
+	{1, 0, 0xF2E, 0x06, FactAdjItemType_Memory},
+	{1, 0, 0xF30, 0x86, FactAdjItemType_Memory},
+	{1, 0, 0xF32, 0x46, FactAdjItemType_Memory},
+	{1, 0, 0xF34, 0xC6, FactAdjItemType_Memory},
+	{1, 0, 0xF36, 0x0F, FactAdjItemType_Memory},
+	{1, 0, 0xF38, 0x8F, FactAdjItemType_Memory},
+	{0, 0, 0xF3A, 0x31, FactAdjItemType_Peripheral},
+	{0, 0, 0xF3C, 0x32, FactAdjItemType_Peripheral},
+	{0, 0, 0xF3E, 0x6A, FactAdjItemType_Memory},
+	{0, 0, 0xF40, 0x6B, FactAdjItemType_Memory},
+	{1, 0, 0xF42, 0x70, FactAdjItemType_Memory},
+	{1, 0, 0xF44, 0x72, FactAdjItemType_Memory},
+};
+
+static const struct bu63164_scene_parameter_info_t SceneParamInfo = {
+	{MemoryAddr_Kgxdr, MemoryAddr_X_LMT, MemoryAddr_X_TGT,},
+	{
+		{0x7FFE, 0x2406, 0x0830},
+		{0x7FFC, 0x2406, 0x0830},
+		{0x7FFA, 0x2406, 0x0830},
+		{0x7FFE, 0x2406, 0x1478},
+		{0x7FFA, 0x2406, 0x1478},
+		{0x7FF0, 0x2406, 0x1478},
+		{0x7FFE, 0x2406, 0x1EB4},
+		{0x7FF0, 0x2406, 0x1EB4},
+		{0x7FE0, 0x2406, 0x1EB4},
+		{0x7FF0, 0x7FFF, 0x7FFF},
+	},
+};
+
+#define OIS_TRANSFER_SIZE 8
+static int32_t msm_actuator_ois_init(struct msm_actuator_ctrl_t *a_ctrl)
+{
+	uint16_t BytesInTx = 0;
+	uint16_t TotalBytes = 0;
+	uint8_t * ptr = NULL;
+	int32_t rc = 0;
+	const struct firmware *fw = NULL;
+	const char *fw_name_prog = NULL;
+	const char *fw_name_coeff = NULL;
+	struct device *dev = &(a_ctrl->pdev->dev);
+	uint8_t i = 0;
+
+	// Detect module revision - load different FWs for different modules
+	uint16_t sensor_sid = a_ctrl->i2c_client.cci_client->sid;
+	uint16_t build_rev, sts, version;
+	enum msm_camera_i2c_reg_addr_type sensor_addr_type = a_ctrl->i2c_client.addr_type;
+
+
+	a_ctrl->i2c_client.cci_client->sid = EEPROM_SID;
+	a_ctrl->i2c_client.addr_type = MSM_CAMERA_I2C_WORD_ADDR;
+
+	rc = a_ctrl->i2c_client.i2c_func_tbl->i2c_read(
+		&a_ctrl->i2c_client,
+		EEPROM_MODULE_ID,
+		&build_rev,
+		MSM_CAMERA_I2C_BYTE_DATA);
+
+	a_ctrl->i2c_client.cci_client->sid = sensor_sid;
+	a_ctrl->i2c_client.addr_type = sensor_addr_type;
+
+	if (rc) {
+		pr_err("Failed to read EEPROM ID\n");
+		goto msm_actuator_ois_init_Exit;
+	}
+
+	/* setup defaults */
+	fw_name_prog = ModuleFwMap[sizeof(ModuleFwMap)/sizeof(ModuleFwMap[0])-1].fw_name;
+	fw_name_coeff = ModuleFwMap[sizeof(ModuleFwMap)/sizeof(ModuleFwMap[0])-1].coeff_name;
+
+	for( i = 0; i < SENSOR_MODULE_MAX; i++ ) {
+		if( ModuleFwMap[i].rev == build_rev ) {
+			fw_name_prog = ModuleFwMap[i].fw_name;
+			fw_name_coeff = ModuleFwMap[i].coeff_name;
+		}
+	}
+
+	rc = request_firmware(&fw, fw_name_prog, dev);
+	if (rc) {
+			dev_err(dev, "Failed to locate blob %s\n", fw_name_prog);
+			goto msm_actuator_ois_init_Exit;
+	}
+
+	TotalBytes = fw->size;
+
+	for (ptr = (uint8_t *)fw->data; TotalBytes; TotalBytes -= BytesInTx, ptr += BytesInTx)
+	{
+		BytesInTx = (TotalBytes > OIS_TRANSFER_SIZE) ? OIS_TRANSFER_SIZE : TotalBytes;
+		rc = a_ctrl->i2c_client.i2c_func_tbl->i2c_write_seq(
+			&a_ctrl->i2c_client,
+			OpCode_Prog, ptr,
+			BytesInTx);
+		if (rc < 0){
+			goto msm_actuator_ois_releaseFW;
+		}
+	}
+
+	release_firmware(fw);
+
+	// Check to make sure that OIS FW downloaded properly
+	rc = msm_actuator_ois_memory_read(&a_ctrl->i2c_client, MemoryAddr_OIS_STS, &sts);
+	if (rc || ((sts & 0xFF) != 0x04)) {
+		pr_err("Failed to load OIS FW\n");
+		goto msm_actuator_ois_init_Exit;
+	}
+
+	rc = request_firmware(&fw, fw_name_coeff, dev);
+	if (rc) {
+			dev_err(dev, "Failed to locate blob %s\n", fw_name_prog);
+			goto msm_actuator_ois_init_Exit;
+		}
+
+	TotalBytes = fw->size;
+
+	for (ptr = (uint8_t *)fw->data; TotalBytes; TotalBytes -= BytesInTx, ptr += BytesInTx)
+	{
+		BytesInTx = (TotalBytes > OIS_TRANSFER_SIZE) ? OIS_TRANSFER_SIZE : TotalBytes;
+		rc = a_ctrl->i2c_client.i2c_func_tbl->i2c_write_seq(
+			&a_ctrl->i2c_client,
+			OpCode_Coeff, ptr,
+			BytesInTx);
+		if (rc < 0){
+			goto msm_actuator_ois_releaseFW;
+		}
+	}
+
+	release_firmware(fw);
+
+	// Print out OIS FW and coefficient versions
+	rc = msm_actuator_ois_memory_read(&a_ctrl->i2c_client, MemoryAddr_FIRMVER, &version);
+	if (rc) goto msm_actuator_ois_init_Exit;
+	pr_err("OIS firmware version: %x\n", version);
+
+	rc = msm_actuator_ois_memory_read(&a_ctrl->i2c_client, MemoryAddr_CEFTYP, &version);
+	if (rc) goto msm_actuator_ois_init_Exit;
+	pr_err("OIS coefficient version: %x\n", version);
+
+	return 0;
+
+msm_actuator_ois_releaseFW:
+	release_firmware(fw);
+msm_actuator_ois_init_Exit:
+	pr_err("Error in %s at line %d\n", __func__, __LINE__);
+	return rc;
+
+}
+
+static int32_t msm_actuator_ois_memory_write(
+	struct msm_camera_i2c_client *i2c_client,
+	uint8_t mem_addr,
+	uint16_t data)
+{
+	int32_t rc = 0;
+	enum msm_camera_i2c_reg_addr_type sensor_addr_type = i2c_client->addr_type;
+
+	i2c_client->addr_type = MSM_CAMERA_I2C_WORD_ADDR;
+
+	data = ((data & 0xFF) << 8) | (data >> 8);
+	rc = i2c_client->i2c_func_tbl->i2c_write(
+	i2c_client, (OpCode_Memory_RW << 8) | mem_addr, data,
+	MSM_CAMERA_I2C_WORD_DATA);
+
+	i2c_client->addr_type = sensor_addr_type;
+
+	return rc;
+}
+
+static int32_t msm_actuator_ois_memory_read(
+	struct msm_camera_i2c_client *i2c_client,
+	uint8_t mem_addr,
+	uint16_t * data)
+{
+	int32_t rc = 0;
+	enum msm_camera_i2c_reg_addr_type sensor_addr_type = i2c_client->addr_type;
+
+	i2c_client->addr_type = MSM_CAMERA_I2C_WORD_ADDR;
+
+	rc = i2c_client->i2c_func_tbl->i2c_read(
+	i2c_client, (OpCode_Memory_RW << 8) | mem_addr, data,
+	MSM_CAMERA_I2C_WORD_DATA);
+
+	i2c_client->addr_type = sensor_addr_type;
+
+	return rc;
+}
+
+static int32_t msm_actuator_ois_enable(
+	struct msm_actuator_ctrl_t *a_ctrl, 
+	uint8_t enable_ois)
+{
+	uint16_t ctrl_reg_val;
+	uint16_t ctrl_reg_val1;
+	int32_t rc = 0;
+	enum msm_camera_i2c_reg_addr_type sensor_addr_type = a_ctrl->i2c_client.addr_type;
+
+
+	rc = msm_actuator_ois_memory_read(&a_ctrl->i2c_client, MemoryAddr_EQCTL, &ctrl_reg_val);
+	if (rc < 0)
+		goto msm_actuator_ois_enable_Exit;
+
+	if (enable_ois)
+		ctrl_reg_val |= 0x0101;
+	else
+		ctrl_reg_val &= ~0x0101;
+
+	rc = msm_actuator_ois_memory_write(&a_ctrl->i2c_client, MemoryAddr_EQCTL, ctrl_reg_val);
+	if (rc < 0){
+		goto msm_actuator_ois_enable_Exit;
+	}
+
+	a_ctrl->i2c_client.addr_type = MSM_CAMERA_I2C_WORD_ADDR;
+
+	rc = a_ctrl->i2c_client.i2c_func_tbl->i2c_read(
+		&a_ctrl->i2c_client, (OpCode_Memory_RW << 8) | 0x7F, &ctrl_reg_val1, MSM_CAMERA_I2C_WORD_DATA);
+	if (rc < 0){
+		goto msm_actuator_ois_enable_Exit;
+	}
+	a_ctrl->i2c_client.addr_type = sensor_addr_type;
+
+msm_actuator_ois_enable_Exit:
+	return rc;
+}
+
+static int32_t msm_actuator_ois_peripheral_write(
+	struct msm_camera_i2c_client *i2c_client,
+	uint8_t mem_addr,
+	uint16_t data)
+{
+	int32_t rc = 0;
+	enum msm_camera_i2c_reg_addr_type sensor_addr_type = i2c_client->addr_type;
+
+	i2c_client->addr_type = MSM_CAMERA_I2C_WORD_ADDR;
+
+	data = ((data & 0xFF) << 8) | (data >> 8);
+	rc = i2c_client->i2c_func_tbl->i2c_write(
+	i2c_client, (OpCode_Pheripheral_RW << 8) | mem_addr, data,
+	MSM_CAMERA_I2C_WORD_DATA);
+
+	i2c_client->addr_type = sensor_addr_type;
+
+	return rc;
+}
+
+static int32_t msm_actuator_ois_fact_adj_apply(
+	struct msm_actuator_ctrl_t *a_ctrl,
+	struct bu63164_fact_adj_item_t *pFactoryAdjData,
+	uint16_t total_entries)
+{
+	uint16_t i = 0;
+	int32_t rc = 0;
+	uint16_t sensor_sid = a_ctrl->i2c_client.cci_client->sid;
+	enum msm_camera_i2c_reg_addr_type sensor_addr_type = a_ctrl->i2c_client.addr_type;
+
+	for (i = 0; i < total_entries; i++)
+	{
+
+		a_ctrl->i2c_client.cci_client->sid = EEPROM_SID;
+		a_ctrl->i2c_client.addr_type = MSM_CAMERA_I2C_WORD_ADDR;
+
+		RETURN_STATUS_CHECK(a_ctrl->i2c_client.i2c_func_tbl->i2c_read(
+			&a_ctrl->i2c_client,
+			pFactoryAdjData[i].eerom_addr,
+			&pFactoryAdjData[i].data,
+			MSM_CAMERA_I2C_WORD_DATA));
+
+		a_ctrl->i2c_client.cci_client->sid = sensor_sid;
+		a_ctrl->i2c_client.addr_type = sensor_addr_type;
+
+		if( !pFactoryAdjData[i].en )
+			continue;
+
+		pFactoryAdjData[i].data = ((pFactoryAdjData[i].data & 0xFF) << 8) | (pFactoryAdjData[i].data >> 8);
+		if (pFactoryAdjData[i].item_type == FactAdjItemType_Peripheral)
+		{
+			RETURN_STATUS_CHECK(
+				msm_actuator_ois_peripheral_write(
+				&a_ctrl->i2c_client, pFactoryAdjData[i].ctrl_addr, pFactoryAdjData[i].data));
+		}
+		else if (pFactoryAdjData[i].item_type == FactAdjItemType_Memory)
+		{
+			RETURN_STATUS_CHECK(
+				msm_actuator_ois_memory_write(
+				&a_ctrl->i2c_client, pFactoryAdjData[i].ctrl_addr, pFactoryAdjData[i].data));
+		}
+	}
+
+	a_ctrl->i2c_client.cci_client->sid = sensor_sid;
+	a_ctrl->i2c_client.addr_type = sensor_addr_type;
+
+	// Special case for TMP_X, TMP_Y
+	RETURN_STATUS_CHECK(
+				msm_actuator_ois_memory_write(
+				&a_ctrl->i2c_client, MemoryAddr_TMP_X, 0));
+	RETURN_STATUS_CHECK(
+				msm_actuator_ois_memory_write(
+				&a_ctrl->i2c_client, MemoryAddr_TMP_Y, 0));
+
+	return rc;
+
+Error_Exit:
+	pr_err("Error in %s at line %d rc = %d\n", __func__, __LINE__, rc);
+	return rc;
+
+}
+
+
+static void msm_actuator_ois_parse_i2c_params(struct msm_actuator_ctrl_t *a_ctrl,
+	int16_t next_lens_position, uint32_t hw_params, uint16_t delay)
+{
+
+	char buff[5];
+	buff[0] = 0xF0;
+	buff[1] = 0xB0;
+	buff[2] = 0x00;
+	buff[3] = (next_lens_position & 0xFF00) >> 8;
+	buff[4] = (next_lens_position & 0xFF);
+
+	pr_debug("writing via i2c_write\n");
+	a_ctrl->i2c_client.i2c_func_tbl->i2c_write_seq(&a_ctrl->i2c_client,
+		buff[0], &buff[1], 4);
+	usleep_range(delay, delay + 1000);
+	pr_debug("completed writing via i2c_write\n");
+	CDBG("Exit\n");
+}
+
+int32_t msm_actuator_ois_set_scene_param(
+	struct msm_actuator_ctrl_t *a_ctrl,
+	enum bu63164_scene_param_t scene,
+	struct bu63164_fact_adj_item_t *pFactoryAdjData,
+	uint8_t enable_ois,
+	uint8_t filter,
+	uint8_t range)
+{
+	int32_t rc = 0;
+	uint16_t i = 0;
+	uint16_t data = 0;
+
+	// Disable OIS
+	RETURN_STATUS_CHECK(msm_actuator_ois_enable(a_ctrl, 0));
+
+	for (i = 0; i < SCENE_REG_MAX; i++)
+	{
+		RETURN_STATUS_CHECK(msm_actuator_ois_memory_write(&(a_ctrl->i2c_client), SceneParamInfo.addr[i], SceneParamInfo.data[scene][i]));
+	}
+	for (i = 0; i < SCENE_REG_MAX; i++)
+	{
+		RETURN_STATUS_CHECK(msm_actuator_ois_memory_write(&(a_ctrl->i2c_client), SceneParamInfo.addr[i] + 0x80, SceneParamInfo.data[scene][i]));
+	}
+
+	if (filter == 1)
+	{
+		RETURN_STATUS_CHECK(msm_actuator_ois_memory_read(&(a_ctrl->i2c_client), MemoryAddr_EQCTL, &data));
+		data |= 0x4000;
+		RETURN_STATUS_CHECK(msm_actuator_ois_memory_write(&(a_ctrl->i2c_client), MemoryAddr_EQCTL, data));
+
+		RETURN_STATUS_CHECK(msm_actuator_ois_memory_write(&(a_ctrl->i2c_client), MemoryAddr_Kgx13, 0x5900));
+		RETURN_STATUS_CHECK(msm_actuator_ois_memory_write(&(a_ctrl->i2c_client), MemoryAddr_Kgx14, 0xC700));
+		RETURN_STATUS_CHECK(msm_actuator_ois_memory_write(&(a_ctrl->i2c_client), MemoryAddr_Kgy13, 0x5900));
+		RETURN_STATUS_CHECK(msm_actuator_ois_memory_write(&(a_ctrl->i2c_client), MemoryAddr_Kgy14, 0xC700));
+	}
+	else
+	{
+		RETURN_STATUS_CHECK(msm_actuator_ois_memory_read(&(a_ctrl->i2c_client), MemoryAddr_EQCTL, &data));
+		data &= ~0x4000;
+		RETURN_STATUS_CHECK(msm_actuator_ois_memory_write(&(a_ctrl->i2c_client), MemoryAddr_EQCTL, data));
+
+		RETURN_STATUS_CHECK(msm_actuator_ois_memory_write(&(a_ctrl->i2c_client), MemoryAddr_Kgx13, 0x7470));
+		RETURN_STATUS_CHECK(msm_actuator_ois_memory_write(&(a_ctrl->i2c_client), MemoryAddr_Kgx14, 0xCB90));
+		RETURN_STATUS_CHECK(msm_actuator_ois_memory_write(&(a_ctrl->i2c_client), MemoryAddr_Kgy13, 0x7470));
+		RETURN_STATUS_CHECK(msm_actuator_ois_memory_write(&(a_ctrl->i2c_client), MemoryAddr_Kgy14, 0xCB90));
+	}
+
+	RETURN_STATUS_CHECK(msm_actuator_ois_memory_write(&(a_ctrl->i2c_client), MemoryAddr_wDgx02, 0x0000));
+	RETURN_STATUS_CHECK(msm_actuator_ois_memory_write(&(a_ctrl->i2c_client), MemoryAddr_wDgx03, 0x0000));
+	RETURN_STATUS_CHECK(msm_actuator_ois_memory_write(&(a_ctrl->i2c_client), MemoryAddr_wDgx06, 0x7FFF));
+	RETURN_STATUS_CHECK(msm_actuator_ois_memory_write(&(a_ctrl->i2c_client), MemoryAddr_Kgx15,  0x0000));
+	
+	RETURN_STATUS_CHECK(msm_actuator_ois_memory_write(&(a_ctrl->i2c_client), MemoryAddr_wDgy02, 0x0000));
+	RETURN_STATUS_CHECK(msm_actuator_ois_memory_write(&(a_ctrl->i2c_client), MemoryAddr_wDgy03, 0x0000));
+	RETURN_STATUS_CHECK(msm_actuator_ois_memory_write(&(a_ctrl->i2c_client), MemoryAddr_wDgy06, 0x7FFF));
+	RETURN_STATUS_CHECK(msm_actuator_ois_memory_write(&(a_ctrl->i2c_client), MemoryAddr_Kgy15,  0x0000));
+
+	if (range == 1)
+	{
+		RETURN_STATUS_CHECK(
+			msm_actuator_ois_peripheral_write(
+				&(a_ctrl->i2c_client), FactoryAdjData[FactAdjName_HALOFS_X].ctrl_addr, FactoryAdjData[FactAdjName_SFTHAL_X].data));
+		RETURN_STATUS_CHECK(
+			msm_actuator_ois_peripheral_write(
+				&(a_ctrl->i2c_client), FactoryAdjData[FactAdjName_HALOFS_Y].ctrl_addr, FactoryAdjData[FactAdjName_SFTHAL_Y].data));
+	}
+	else
+	{
+		RETURN_STATUS_CHECK(
+			msm_actuator_ois_peripheral_write(
+				&(a_ctrl->i2c_client), FactoryAdjData[FactAdjName_HALOFS_X].ctrl_addr, FactoryAdjData[FactAdjName_HALOFS_X].data));
+		RETURN_STATUS_CHECK(
+			msm_actuator_ois_peripheral_write(
+				&(a_ctrl->i2c_client), FactoryAdjData[FactAdjName_HALOFS_Y].ctrl_addr, FactoryAdjData[FactAdjName_HALOFS_Y].data));
+	}
+	// Enable / Disable OIS
+	RETURN_STATUS_CHECK(msm_actuator_ois_enable(a_ctrl, enable_ois));
+
+	return rc;
+
+Error_Exit:
+	pr_err("Error in %s at line %d rc = %d\n", __func__, __LINE__, rc);
+	return rc;
+}
+
+static int32_t msm_actuator_ois_vcoset(struct msm_actuator_ctrl_t *a_ctrl)
+{
+	int32_t rc = 0;
+	uint16_t CLK_PS = 12000;     // Input Frequency [kHz] of CLK/PS terminal (Depend on your system)     RHM_HT 2013.03.19       Change 6M -> 12M
+	uint16_t FVCO_1 = 27000;     // Target Frequency [kHz]
+	uint16_t FREF = 25;          // Reference Clock Frequency [kHz]
+
+	uint16_t DIV_N = CLK_PS / FREF - 1;  // calc DIV_N
+	uint16_t DIV_M = FVCO_1 / FREF - 1;  // calc DIV_M
+
+	RETURN_STATUS_CHECK(msm_actuator_ois_peripheral_write(&(a_ctrl->i2c_client), 0x62, DIV_N));
+	RETURN_STATUS_CHECK(msm_actuator_ois_peripheral_write(&(a_ctrl->i2c_client), 0x63, DIV_M));
+	RETURN_STATUS_CHECK(msm_actuator_ois_peripheral_write(&(a_ctrl->i2c_client), 0x64, 0x4060));
+
+	RETURN_STATUS_CHECK(msm_actuator_ois_peripheral_write(&(a_ctrl->i2c_client), 0x60, 0x3011));
+	RETURN_STATUS_CHECK(msm_actuator_ois_peripheral_write(&(a_ctrl->i2c_client), 0x65, 0x0080));
+	RETURN_STATUS_CHECK(msm_actuator_ois_peripheral_write(&(a_ctrl->i2c_client), 0x61, 0x8002));
+	RETURN_STATUS_CHECK(msm_actuator_ois_peripheral_write(&(a_ctrl->i2c_client), 0x61, 0x8003));
+	RETURN_STATUS_CHECK(msm_actuator_ois_peripheral_write(&(a_ctrl->i2c_client), 0x61, 0x8809));
+
+	msleep(30); 				   // Wait for PLL lock
+
+	RETURN_STATUS_CHECK(msm_actuator_ois_peripheral_write(&(a_ctrl->i2c_client), 0x05, 0x000C));
+	RETURN_STATUS_CHECK(msm_actuator_ois_peripheral_write(&(a_ctrl->i2c_client), 0x05, 0x000D));
+
+	return rc;
+Error_Exit:
+	pr_err("Error in %s at line %d rc = %d\n", __func__, __LINE__, rc);
+	return rc;
+}
+
+static int32_t msm_actuator_ois_init_focus(struct msm_actuator_ctrl_t *a_ctrl,
+	uint16_t size, struct reg_settings_t *settings)
+{
+	int32_t rc = -EFAULT;
+	uint16_t status = 0;
+
+	CDBG("Enter\n");
+
+	RETURN_STATUS_CHECK(msm_actuator_ois_init(a_ctrl));
+
+	RETURN_STATUS_CHECK(
+		msm_actuator_ois_fact_adj_apply(
+		a_ctrl, FactoryAdjData, sizeof(FactoryAdjData) / sizeof(FactoryAdjData[0])));
+
+	RETURN_STATUS_CHECK(msm_actuator_ois_vcoset(a_ctrl));
+
+	if (size)
+		RETURN_STATUS_CHECK(msm_actuator_init_focus(a_ctrl, size, settings));
+
+	a_ctrl->curr_step_pos = 0;
+
+	RETURN_STATUS_CHECK(msm_actuator_ois_memory_read(&a_ctrl->i2c_client, MemoryAddr_OIS_STS, &status));
+
+	if (status != 0x0104)
+	{
+		pr_err("Error in %s at line %d Actuator in bad state\n", __func__, __LINE__);
+		rc = -1;
+		goto Error_Exit;
+	}
+	
+	// Position Servo ON (OIS OFF)
+	RETURN_STATUS_CHECK(msm_actuator_ois_memory_write(&a_ctrl->i2c_client, MemoryAddr_EQCTL, 0x0C0C));
+
+	RETURN_STATUS_CHECK(msm_actuator_ois_set_scene_param(a_ctrl, SCENE_PARAM_SPORT3, FactoryAdjData, 1, 0, 0));
+
+	return rc;
+Error_Exit:
+	pr_err("Error in %s at line %d rc = %d\n", __func__, __LINE__, rc);
 	return rc;
 }
 
@@ -823,6 +1457,7 @@ static struct msm_camera_i2c_fn_t msm_sensor_cci_func_tbl = {
 	.i2c_read = msm_camera_cci_i2c_read,
 	.i2c_read_seq = msm_camera_cci_i2c_read_seq,
 	.i2c_write = msm_camera_cci_i2c_write,
+	.i2c_write_seq = msm_camera_cci_i2c_write_seq,
 	.i2c_write_table = msm_camera_cci_i2c_write_table,
 	.i2c_write_seq_table = msm_camera_cci_i2c_write_seq_table,
 	.i2c_write_table_w_microdelay =
@@ -1188,6 +1823,19 @@ static struct msm_actuator msm_piezo_actuator_table = {
 			msm_actuator_piezo_set_default_focus,
 		.actuator_init_focus = msm_actuator_init_focus,
 		.actuator_parse_i2c_params = msm_actuator_parse_i2c_params,
+	},
+};
+
+static struct msm_actuator msm_ois_actuator_table = {
+	.act_type = ACTUATOR_OIS,
+	.func_tbl = {
+		.actuator_init_step_table = msm_actuator_init_step_table,
+		.actuator_move_focus = msm_actuator_move_focus,
+		.actuator_write_focus = msm_actuator_write_focus,
+		.actuator_set_default_focus = msm_actuator_set_default_focus,
+		.actuator_init_focus = msm_actuator_ois_init_focus,
+		.actuator_parse_i2c_params = msm_actuator_ois_parse_i2c_params,
+		.actuator_set_position = msm_actuator_set_position,
 	},
 };
 

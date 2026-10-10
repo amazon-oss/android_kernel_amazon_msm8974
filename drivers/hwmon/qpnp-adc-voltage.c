@@ -130,6 +130,10 @@ static struct qpnp_vadc_scale_fn vadc_scale_fn[] = {
 	[SCALE_QRD_BATT_THERM] = {qpnp_adc_scale_qrd_batt_therm},
 	[SCALE_QRD_SKUAA_BATT_THERM] = {qpnp_adc_scale_qrd_skuaa_batt_therm},
 	[SCALE_QRD_SKUG_BATT_THERM] = {qpnp_adc_scale_qrd_skug_batt_therm},
+	[SCALE_THERM_DECIDEGC_100K_PULLUP] =
+		{qpnp_adc_scale_therm_decidegc_100k_pullup},
+	[SCALE_THERM_DECIDEGC_150K_PULLUP] =
+		{qpnp_adc_scale_therm_decidegc_150k_pullup},
 };
 #ifdef CONFIG_TCMD
 struct qpnp_vadc_chip *vchip;
