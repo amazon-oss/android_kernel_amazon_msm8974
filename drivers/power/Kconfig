@@ -414,6 +414,14 @@ config BQ27520_TEST_ENABLE
 	help
 	  Say Y here to enable Test sysfs Interface for BQ27520 Drivers.
 
+config BATTERY_BQ27541_GG
+	tristate "BQ27541 fuel gauge for Amazon Fire Phone"
+	depends on I2C && SENSORS_QPNP_ADC_VOLTAGE
+	help
+	  Say Y here to enable the BQ27541 fuel gauge found on the
+	  Amazon Fire Phone. It reports the battery state through the
+	  bms power supply used by the QPNP charger.
+
 config BATTERY_BQ27541
 	tristate "BQ27541 battery driver"
 	depends on I2C
