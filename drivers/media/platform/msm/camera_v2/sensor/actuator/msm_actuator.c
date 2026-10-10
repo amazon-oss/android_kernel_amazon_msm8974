@@ -45,6 +45,11 @@ static struct msm_actuator *actuators[] = {
 	&msm_ois_actuator_table,
 };
 
+static struct msm_cam_clk_info msm_actuator_ois_clk_info[] = {
+	{"cam_src_clk", 12000000},
+	{"cam_clk", -1},
+};
+
 static int32_t msm_actuator_piezo_set_default_focus(
 	struct msm_actuator_ctrl_t *a_ctrl,
 	struct msm_actuator_move_params_t *move_params)
@@ -811,6 +816,13 @@ static int32_t msm_actuator_ois_init_focus(struct msm_actuator_ctrl_t *a_ctrl,
 
 	CDBG("Enter\n");
 
+	if (!a_ctrl->ois_clk_on) {
+		RETURN_STATUS_CHECK(msm_cam_clk_enable(&a_ctrl->pdev->dev,
+			msm_actuator_ois_clk_info, a_ctrl->ois_clk,
+			ARRAY_SIZE(msm_actuator_ois_clk_info), 1));
+		a_ctrl->ois_clk_on = true;
+	}
+
 	RETURN_STATUS_CHECK(msm_actuator_ois_init(a_ctrl));
 
 	RETURN_STATUS_CHECK(
@@ -1158,6 +1170,11 @@ static int32_t msm_actuator_power_down(struct msm_actuator_ctrl_t *a_ctrl)
 {
 	int32_t rc = 0;
 	CDBG("Enter\n");
+	if (a_ctrl->ois_clk_on) {
+		msm_cam_clk_enable(&a_ctrl->pdev->dev, msm_actuator_ois_clk_info,
+			a_ctrl->ois_clk, ARRAY_SIZE(msm_actuator_ois_clk_info), 0);
+		a_ctrl->ois_clk_on = false;
+	}
 	if (a_ctrl->actuator_state != ACTUATOR_POWER_DOWN) {
 		if (a_ctrl->vcm_enable) {
 			rc = gpio_direction_output(a_ctrl->vcm_pwd, 0);

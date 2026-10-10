@@ -4986,6 +4986,8 @@ static struct clk_lookup msm_clocks_kodiak_only[] __initdata = {
 	CLK_LOOKUP("cam_src_clk", mmss_gp0_clk_src.c, "2.qcom,camera"),
 	CLK_LOOKUP("cam_clk", camss_gp0_clk.c, "0.qcom,camera"),
 	CLK_LOOKUP("cam_clk", camss_gp0_clk.c, "2.qcom,camera"),
+	CLK_LOOKUP("cam_src_clk", gp1_clk_src.c, "1c.qcom,actuator"),
+	CLK_LOOKUP("cam_clk", gcc_gp1_clk.c, "1c.qcom,actuator"),
 };
 
 static struct clk_lookup msm_clocks_8974_common[] __initdata = {

@@ -98,6 +98,8 @@ struct msm_actuator_ctrl_t {
 	struct msm_camera_i2c_reg_array *i2c_reg_tbl;
 	uint16_t i2c_tbl_index;
 	enum cci_i2c_master_t cci_master;
+	struct clk *ois_clk[2];
+	bool ois_clk_on;
 	uint32_t subdev_id;
 	struct msm_actuator_vreg vreg_cfg;
 	enum msm_actuator_state_t actuator_state;
