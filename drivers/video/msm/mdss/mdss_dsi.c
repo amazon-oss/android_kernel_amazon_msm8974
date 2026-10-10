@@ -93,10 +93,12 @@ static int mdss_dsi_panel_power_on(struct mdss_panel_data *pdata, int enable)
 				goto error;
 			}
 
+#ifdef CONFIG_TOUCHSCREEN_SYNAPTICS_DSX
 			if ((mdss_dsi_panel_id() < PANEL_FP2_S6D6FA1_VIDEO) && synaptics_touch_bdata && (synaptics_touch_bdata->reset_gpio >= 0)) {
 					gpio_set_value(synaptics_touch_bdata->reset_gpio, !synaptics_touch_bdata->reset_on_state);
 					msleep(synaptics_touch_bdata->reset_delay_ms);
 			}
+#endif
 		}
 	} else {
 		ret = mdss_dsi_panel_reset(pdata, 0);
@@ -106,10 +108,12 @@ static int mdss_dsi_panel_power_on(struct mdss_panel_data *pdata, int enable)
 			goto error;
 		}
 
+#ifdef CONFIG_TOUCHSCREEN_SYNAPTICS_DSX
                 if ((mdss_dsi_panel_id() < PANEL_FP2_S6D6FA1_VIDEO) && synaptics_touch_bdata && (synaptics_touch_bdata->reset_gpio >= 0)) {
 		        gpio_set_value(synaptics_touch_bdata->reset_gpio, synaptics_touch_bdata->reset_on_state);
                         msleep(synaptics_touch_bdata->reset_active_ms);
 		}
+#endif
 
 		if (gpio_is_valid(ctrl_pdata->touch_rst_gpio))
 			gpio_set_value(ctrl_pdata->touch_rst_gpio, 0);
