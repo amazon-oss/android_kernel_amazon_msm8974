@@ -390,15 +390,17 @@ static int synaptics_rmi4_i2c_probe(struct i2c_client *client,
 	 * which is detected based on the installed panel.
 	 * Defer probing if this is not known yet, and in other cases return ENODEV.
 	 */
-	switch (mdss_dsi_panel_id()) {
-		case PANEL_FP2_EA8062_CMD:
-			break;
-		case PANEL_FP2_UNKNOWN:
-			return -EPROBE_DEFER;
-		case PANEL_FP2_S6D6FA1_VIDEO:
-			/* fall through */
-		default:
-			return -ENODEV;
+	if (of_device_is_compatible(client->dev.of_node, "synaptics,dsx")) {
+		switch (mdss_dsi_panel_id()) {
+			case PANEL_FP2_EA8062_CMD:
+				break;
+			case PANEL_FP2_UNKNOWN:
+				return -EPROBE_DEFER;
+			case PANEL_FP2_S6D6FA1_VIDEO:
+				/* fall through */
+			default:
+				return -ENODEV;
+		}
 	}
 
 	if (!i2c_check_functionality(client->adapter,
@@ -491,6 +493,9 @@ MODULE_DEVICE_TABLE(i2c, synaptics_rmi4_id_table);
 static struct of_device_id synaptics_rmi4_of_match_table[] = {
 	{
 		.compatible = "synaptics,dsx",
+	},
+	{
+		.compatible = "synaptics,rmi4_b",
 	},
 	{},
 };
