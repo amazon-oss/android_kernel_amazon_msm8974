@@ -36,6 +36,9 @@
 #include <linux/gpio.h>
 #include <linux/input.h>
 #include "wcdcal-hwdep.h"
+#ifdef CONFIG_SND_HEADSET_TS3A225E
+#include <linux/misc/ts3a225e.h>
+#endif
 #include "wcd9320.h"
 #include "wcd9306.h"
 #include "wcd9xxx-mbhc.h"
@@ -2256,11 +2259,24 @@ static void wcd9xxx_find_plug_and_report(struct wcd9xxx_mbhc *mbhc,
 					 enum wcd9xxx_mbhc_plug_type plug_type)
 {
 	bool anc_mic_found = false;
+#ifdef CONFIG_SND_HEADSET_TS3A225E
+	int result = 0;
+#endif
 
 	pr_debug("%s: enter current_plug(%d) new_plug(%d)\n",
 		 __func__, mbhc->current_plug, plug_type);
 
 	WCD9XXX_BCL_ASSERT_LOCKED(mbhc->resmgr);
+
+#ifdef CONFIG_SND_HEADSET_TS3A225E
+	/* Note: Direct cast to headset_plug_type_t, which maps directly
+		to wcd9xxx_mbhc_plug_type type
+	 */
+	result = ts3a225e_headset_switch_set_type((headset_plug_type_t)plug_type);
+	if (result) {
+		pr_err("%s - Failed to set the headset switch for headset type %d.  Error code = %d\n", __func__, plug_type, result);
+	}
+#endif
 
 	if (plug_type == PLUG_TYPE_HEADPHONE &&
 	    mbhc->current_plug == PLUG_TYPE_NONE) {
@@ -2279,8 +2295,15 @@ static void wcd9xxx_find_plug_and_report(struct wcd9xxx_mbhc *mbhc,
 				wcd9xxx_report_plug(mbhc, 0,
 							 SND_JACK_HEADPHONE);
 		}
+#ifdef CONFIG_SND_HEADSET_TS3A225E
+		wcd9xxx_report_plug(mbhc, 1, SND_JACK_HEADSET);
+		/* Button detection required RC oscillator */
+		wcd9xxx_mbhc_ctrl_clk_bandgap(mbhc, true);
+		wcd9xxx_start_hs_polling(mbhc);
+#else
 		wcd9xxx_report_plug(mbhc, 1, SND_JACK_UNSUPPORTED);
 		wcd9xxx_cleanup_hs_polling(mbhc);
+#endif
 	} else if (plug_type == PLUG_TYPE_HEADSET) {
 
 		if (mbhc->mbhc_cfg->enable_anc_mic_detect) {
@@ -3197,8 +3220,19 @@ static void wcd9xxx_swch_irq_handler(struct wcd9xxx_mbhc *mbhc)
 	bool insert;
 	bool is_removed = false;
 	struct snd_soc_codec *codec = mbhc->codec;
+#ifdef CONFIG_SND_HEADSET_TS3A225E
+	int result = 0;
+#endif
 
 	pr_debug("%s: enter\n", __func__);
+
+#ifdef CONFIG_SND_HEADSET_TS3A225E
+	/* Reset to CTIA MODE */
+	result = ts3a225e_headset_switch_set_type(INPUT_TYPE_HEADSET);
+	if (result) {
+		pr_err("%s - Failed to set the headset switch for headset type %d.  Error code = %d\n", __func__, INPUT_TYPE_HEADSET, result);
+	}
+#endif
 
 	mbhc->in_swch_irq_handler = true;
 	/* Wait here for debounce time */
@@ -4944,6 +4978,10 @@ int wcd9xxx_mbhc_init(struct wcd9xxx_mbhc *mbhc, struct wcd9xxx_resmgr *resmgr,
 	int ret;
 	void *core_res;
 
+#ifdef CONFIG_SND_HEADSET_TS3A225E
+        int headset_result = 0;
+#endif
+
 	pr_debug("%s: enter\n", __func__);
 	memset(&mbhc->mbhc_bias_regs, 0, sizeof(struct mbhc_micbias_regs));
 	memset(&mbhc->mbhc_data, 0, sizeof(struct mbhc_internal_cal_data));
@@ -5103,6 +5141,16 @@ int wcd9xxx_mbhc_init(struct wcd9xxx_mbhc *mbhc, struct wcd9xxx_resmgr *resmgr,
 	}
 	wcd9xxx_disable_irq(core_res, mbhc->intr_ids->hph_right_ocp);
 
+#ifdef CONFIG_SND_HEADSET_TS3A225E
+        headset_result = ts3a225e_headset_switch_init();
+        if (headset_result) {
+            pr_err("%s: Failed to initialize ts3a225e switch.  Error code = %d\n", __func__, headset_result);
+            /* Note: Unlike other parts of the initilization, nothing special
+                     to do at the end here if there's a failure.
+             */
+        }
+#endif
+
 	wcd9xxx_regmgr_cond_register(resmgr, 1 << WCD9XXX_COND_HPH_MIC |
 					     1 << WCD9XXX_COND_HPH);
 
@@ -5148,6 +5196,9 @@ void wcd9xxx_mbhc_deinit(struct wcd9xxx_mbhc *mbhc)
 	mutex_destroy(&mbhc->mbhc_lock);
 	wcd9xxx_resmgr_unregister_notifier(mbhc->resmgr, &mbhc->nblock);
 	wcd9xxx_cleanup_debugfs(mbhc);
+#ifdef CONFIG_SND_HEADSET_TS3A225E
+        ts3a225e_headset_switch_deinit();
+#endif
 }
 EXPORT_SYMBOL(wcd9xxx_mbhc_deinit);
 

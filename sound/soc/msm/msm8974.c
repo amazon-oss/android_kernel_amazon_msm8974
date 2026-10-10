@@ -1818,6 +1818,163 @@ static void msm8974_snd_shudown(struct snd_pcm_substream *substream)
 
 }
 
+struct msm8974_mi2s_gpio {
+	unsigned gpio;
+	const char *name;
+};
+
+static struct msm8974_mi2s_gpio sec_mi2s_gpio[] = {
+	{ 79, "SEC_MI2S_SCK" },
+	{ 80, "SEC_MI2S_WS" },
+	{ 81, "SEC_MI2S_DATA0" },
+};
+
+static struct {
+	struct clk *core_clk;
+	struct clk *osr_clk;
+	struct clk *ibit_clk;
+	atomic_t ref_count;
+} sec_mi2s_clk;
+
+static void msm8974_mi2s_free_gpios(int count)
+{
+	while (--count >= 0)
+		gpio_free(sec_mi2s_gpio[count].gpio);
+}
+
+static void msm8974_mi2s_put_clks(void)
+{
+	if (sec_mi2s_clk.ibit_clk) {
+		clk_disable_unprepare(sec_mi2s_clk.ibit_clk);
+		clk_put(sec_mi2s_clk.ibit_clk);
+		sec_mi2s_clk.ibit_clk = NULL;
+	}
+
+	if (sec_mi2s_clk.osr_clk) {
+		clk_disable_unprepare(sec_mi2s_clk.osr_clk);
+		clk_put(sec_mi2s_clk.osr_clk);
+		sec_mi2s_clk.osr_clk = NULL;
+	}
+
+	if (sec_mi2s_clk.core_clk) {
+		clk_put(sec_mi2s_clk.core_clk);
+		sec_mi2s_clk.core_clk = NULL;
+	}
+}
+
+static int msm8974_mi2s_startup(struct snd_pcm_substream *substream)
+{
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
+	int ret, i;
+
+	if (atomic_inc_return(&sec_mi2s_clk.ref_count) != 1)
+		return 0;
+
+	for (i = 0; i < ARRAY_SIZE(sec_mi2s_gpio); i++) {
+		ret = gpio_request(sec_mi2s_gpio[i].gpio, sec_mi2s_gpio[i].name);
+		if (ret) {
+			pr_err("%s: Failed to request gpio %d\n", __func__,
+			       sec_mi2s_gpio[i].gpio);
+			msm8974_mi2s_free_gpios(i);
+			goto err;
+		}
+	}
+
+	sec_mi2s_clk.core_clk = clk_get(cpu_dai->dev, "core_clk");
+	if (IS_ERR(sec_mi2s_clk.core_clk)) {
+		dev_err(cpu_dai->dev, "Failed to get core clk\n");
+		ret = PTR_ERR(sec_mi2s_clk.core_clk);
+		sec_mi2s_clk.core_clk = NULL;
+		goto err_gpio;
+	}
+	clk_set_rate(sec_mi2s_clk.core_clk, 12288000);
+
+	sec_mi2s_clk.osr_clk = clk_get(cpu_dai->dev, "osr_clk");
+	if (IS_ERR(sec_mi2s_clk.osr_clk)) {
+		dev_err(cpu_dai->dev, "Failed to get osr clk\n");
+		ret = PTR_ERR(sec_mi2s_clk.osr_clk);
+		sec_mi2s_clk.osr_clk = NULL;
+		goto err_clk;
+	}
+	ret = clk_prepare_enable(sec_mi2s_clk.osr_clk);
+	if (ret) {
+		dev_err(cpu_dai->dev, "Failed to enable osr clk\n");
+		clk_put(sec_mi2s_clk.osr_clk);
+		sec_mi2s_clk.osr_clk = NULL;
+		goto err_clk;
+	}
+
+	sec_mi2s_clk.ibit_clk = clk_get(cpu_dai->dev, "ibit_clk");
+	if (IS_ERR(sec_mi2s_clk.ibit_clk)) {
+		dev_err(cpu_dai->dev, "Failed to get ibit clk\n");
+		ret = PTR_ERR(sec_mi2s_clk.ibit_clk);
+		sec_mi2s_clk.ibit_clk = NULL;
+		goto err_clk;
+	}
+	clk_set_rate(sec_mi2s_clk.ibit_clk, 7);
+	ret = clk_prepare_enable(sec_mi2s_clk.ibit_clk);
+	if (ret) {
+		dev_err(cpu_dai->dev, "Failed to enable ibit clk\n");
+		clk_put(sec_mi2s_clk.ibit_clk);
+		sec_mi2s_clk.ibit_clk = NULL;
+		goto err_clk;
+	}
+
+	ret = snd_soc_dai_set_fmt(cpu_dai, SND_SOC_DAIFMT_CBS_CFS);
+	if (ret < 0)
+		dev_err(cpu_dai->dev, "Failed to set CPU dai format\n");
+
+	return 0;
+
+err_clk:
+	msm8974_mi2s_put_clks();
+err_gpio:
+	msm8974_mi2s_free_gpios(ARRAY_SIZE(sec_mi2s_gpio));
+err:
+	atomic_dec(&sec_mi2s_clk.ref_count);
+	return ret;
+}
+
+static void msm8974_mi2s_shutdown(struct snd_pcm_substream *substream)
+{
+	if (atomic_dec_return(&sec_mi2s_clk.ref_count) != 0)
+		return;
+
+	msm8974_mi2s_put_clks();
+	msm8974_mi2s_free_gpios(ARRAY_SIZE(sec_mi2s_gpio));
+}
+
+static int msm_mi2s_snd_hw_params(struct snd_pcm_substream *substream,
+				  struct snd_pcm_hw_params *params)
+{
+	param_set_mask(params, SNDRV_PCM_HW_PARAM_FORMAT,
+		       slim0_rx_bit_format);
+	return 0;
+}
+
+static int msm_be_mi2s_hw_params_fixup(struct snd_soc_pcm_runtime *rtd,
+				       struct snd_pcm_hw_params *params)
+{
+	struct snd_interval *rate = hw_param_interval(params,
+					SNDRV_PCM_HW_PARAM_RATE);
+	struct snd_interval *channels = hw_param_interval(params,
+					SNDRV_PCM_HW_PARAM_CHANNELS);
+
+	param_set_mask(params, SNDRV_PCM_HW_PARAM_FORMAT,
+		       slim0_rx_bit_format);
+	rate->min = rate->max = 48000;
+	channels->min = channels->max = 2;
+
+	return 0;
+}
+
+static struct snd_soc_ops msm8974_mi2s_be_ops = {
+	.startup = msm8974_mi2s_startup,
+	.hw_params = msm_mi2s_snd_hw_params,
+	.shutdown = msm8974_mi2s_shutdown,
+};
+
 static struct snd_soc_ops msm8974_be_ops = {
 	.startup = msm8974_snd_startup,
 	.hw_params = msm_snd_hw_params,
@@ -2736,6 +2893,19 @@ static struct snd_soc_dai_link msm8974_common_dai_links[] = {
 		.no_pcm = 1,
 		.be_id = MSM_BACKEND_DAI_VOICE2_PLAYBACK_TX,
 		.be_hw_params_fixup = msm_be_hw_params_fixup,
+		.ignore_suspend = 1,
+	},
+	{
+		.name = LPASS_BE_SEC_MI2S_RX,
+		.stream_name = "Secondary MI2S Playback",
+		.cpu_dai_name = "msm-dai-q6-mi2s.1",
+		.platform_name = "msm-pcm-routing",
+		.codec_name = "msm-stub-codec.1",
+		.codec_dai_name = "msm-stub-rx",
+		.no_pcm = 1,
+		.be_id = MSM_BACKEND_DAI_SECONDARY_MI2S_RX,
+		.be_hw_params_fixup = msm_be_mi2s_hw_params_fixup,
+		.ops = &msm8974_mi2s_be_ops,
 		.ignore_suspend = 1,
 	}
 };
