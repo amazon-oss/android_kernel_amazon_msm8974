@@ -72,6 +72,8 @@ endif
 targets += $(DTB_LIST)
 
 # Rule to build device tree blobs
+DTC_FLAGS := -p 2048
+
 $(obj)/%.dtb: $(src)/dts/%.dts FORCE
 	$(call if_changed_dep,dtc)
 
