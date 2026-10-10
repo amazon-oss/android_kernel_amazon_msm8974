@@ -1087,7 +1087,7 @@ static int mdss_fb_blank_sub(int blank_mode, struct fb_info *info,
 		}
 
 		mutex_lock(&mfd->bl_lock);
-		if (!mfd->bl_updated) {
+		if (!mfd->bl_updated && !mfd->panel_info->cont_splash_enabled) {
 			mfd->bl_updated = 1;
 			mdss_fb_set_backlight(mfd, mfd->bl_level_prev_scaled);
 		}
@@ -1114,7 +1114,8 @@ static int mdss_fb_blank_sub(int blank_mode, struct fb_info *info,
 			mfd->op_enable = false;
 			curr_pwr_state = mfd->panel_power_on;
 			mutex_lock(&mfd->bl_lock);
-			mdss_fb_set_backlight(mfd, 0);
+			if (!mfd->panel_info->cont_splash_enabled)
+				mdss_fb_set_backlight(mfd, 0);
 			mfd->panel_power_on = false;
 			mfd->bl_updated = 0;
 			mutex_unlock(&mfd->bl_lock);
