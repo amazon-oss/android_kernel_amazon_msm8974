@@ -3472,13 +3472,14 @@ static int fb_notifier_callback(struct notifier_block *self,
 	struct synaptics_rmi4_data *rmi4_data =
 		container_of(self, struct synaptics_rmi4_data, fb_notif);
 
-	if (evdata && evdata->data && event == FB_EVENT_BLANK && rmi4_data) {
+	if (evdata && evdata->data && rmi4_data) {
 		blank = evdata->data;
-		if (*blank == FB_BLANK_UNBLANK) {
+		if (event == FB_EVENT_BLANK && *blank == FB_BLANK_UNBLANK) {
 			printk("fb_notifier_callback: FB_BLANK_UNBLANK\n");
 			synaptics_rmi4_resume(&(rmi4_data->input_dev->dev));
 		}
-		else if (*blank == FB_BLANK_POWERDOWN) {
+		else if (event == FB_EARLY_EVENT_BLANK &&
+				*blank == FB_BLANK_POWERDOWN) {
 			printk("fb_notifier_callback: FB_BLANK_POWERDOWN\n");
 			synaptics_rmi4_suspend(&(rmi4_data->input_dev->dev));
 		}
