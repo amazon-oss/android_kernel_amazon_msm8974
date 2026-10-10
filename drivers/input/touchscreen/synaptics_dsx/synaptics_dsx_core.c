@@ -1026,7 +1026,7 @@ static int synaptics_rmi4_f12_abs_report(struct synaptics_rmi4_data *rmi4_data,
 
 		if (rmi4_data->hw_if->board_data->x_flip)
 			x = rmi4_data->sensor_max_x - x;
-		//if (rmi4_data->hw_if->board_data->y_flip)
+		if (rmi4_data->hw_if->board_data->y_flip)
 			y = rmi4_data->sensor_max_y - y;
 
 		switch (finger_status) {
