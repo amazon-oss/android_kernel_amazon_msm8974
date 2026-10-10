@@ -1019,6 +1019,8 @@ static int32_t msm_actuator_move_focus(
 	}
 
 	move_params->curr_lens_pos = curr_lens_pos;
+	if (!a_ctrl->i2c_tbl_index)
+		return rc;
 	reg_setting.reg_setting = a_ctrl->i2c_reg_tbl;
 	reg_setting.data_type = a_ctrl->i2c_data_type;
 	reg_setting.size = a_ctrl->i2c_tbl_index;
