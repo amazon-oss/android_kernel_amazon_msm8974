@@ -53,6 +53,7 @@ struct pn544_dev	{
 	unsigned int		clk_req_gpio;
 	struct clk			*ref_clk;
 	struct regulator 	*pvdd_reg;
+	bool				pvdd_enabled;
 //	struct regulator	*pmuvcc_reg;
 	bool				irq_enabled;
 	spinlock_t			irq_enabled_lock;
@@ -267,6 +268,20 @@ static int pn544_dev_open(struct inode *inode, struct file *filp)
 	return 0;
 }
 
+static void pn544_set_pvdd(struct pn544_dev *pn544_dev, bool enable)
+{
+	if (!pn544_dev->pvdd_reg || pn544_dev->pvdd_enabled == enable)
+		return;
+
+	if (enable) {
+		if (regulator_enable(pn544_dev->pvdd_reg))
+			return;
+	} else {
+		regulator_disable(pn544_dev->pvdd_reg);
+	}
+	pn544_dev->pvdd_enabled = enable;
+}
+
 static long  pn544_dev_ioctl(struct file *filp, unsigned int cmd,
 				unsigned long arg)
 {
@@ -278,7 +293,7 @@ static long  pn544_dev_ioctl(struct file *filp, unsigned int cmd,
 			/* power on with firmware download (requires hw reset)
 			 */
 			pr_info("%s power on with firmware\n", __func__);
-			regulator_enable(pn544_dev->pvdd_reg);
+			pn544_set_pvdd(pn544_dev, true);
 			gpio_set_value(pn544_dev->ven_gpio, 1);
 			msleep(20);
 			if (pn544_dev->firm_gpio)
@@ -291,7 +306,7 @@ static long  pn544_dev_ioctl(struct file *filp, unsigned int cmd,
 		} else if (arg == 1) {
 			/* power on */
 			pr_info("%s power on\n", __func__);
-			regulator_enable(pn544_dev->pvdd_reg);
+			pn544_set_pvdd(pn544_dev, true);
 			if (pn544_dev->firm_gpio)
 				gpio_set_value(pn544_dev->firm_gpio, 0);
 			gpio_set_value(pn544_dev->ven_gpio, 1);
@@ -299,7 +314,7 @@ static long  pn544_dev_ioctl(struct file *filp, unsigned int cmd,
 		} else  if (arg == 0) {
 			/* power off */
 			pr_info("%s power off\n", __func__);
-			regulator_disable(pn544_dev->pvdd_reg);
+			pn544_set_pvdd(pn544_dev, false);
 			if (pn544_dev->firm_gpio)
 				gpio_set_value(pn544_dev->firm_gpio, 0);
 			gpio_set_value(pn544_dev->ven_gpio, 0);
