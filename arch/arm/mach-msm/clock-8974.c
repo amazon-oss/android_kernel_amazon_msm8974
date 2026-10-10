@@ -540,6 +540,7 @@ static void __iomem *virt_bases[N_BASES];
 #define mm_gnd_source_val 6
 #define gpll1_hsic_source_val 4
 #define cxo_lpass_source_val 0
+#define lpapll0_lpass_source_val 1
 #define gpll0_lpass_source_val 5
 #define edp_mainlink_mm_source_val 4
 #define edp_pixel_mm_source_val 5
@@ -782,6 +783,21 @@ static struct pll_vote_clk gpll4_clk_src = {
 		.dbg_name = "gpll4_clk_src",
 		.ops = &clk_ops_pll_vote,
 		CLK_INIT(gpll4_clk_src.c),
+	},
+};
+
+static struct pll_vote_clk lpapll0_clk_src = {
+	.en_reg = (void __iomem *)LPASS_LPA_PLL_VOTE_APPS_REG,
+	.en_mask = BIT(0),
+	.status_reg = (void __iomem *)LPAPLL_STATUS_REG,
+	.status_mask = BIT(17),
+	.base = &virt_bases[LPASS_BASE],
+	.c = {
+		.parent = &cxo_clk_src.c,
+		.rate = 491520000,
+		.dbg_name = "lpapll0_clk_src",
+		.ops = &clk_ops_pll_vote,
+		CLK_INIT(lpapll0_clk_src.c),
 	},
 };
 
@@ -1479,6 +1495,7 @@ static struct clk_freq_tbl ftbl_gcc_gp_clk[] = {
 	F( 6750000, gpll0,  1,  1,  89),
 	F( 8000000, gpll0, 15,  1,   5),
 	F( 9600000,   cxo,  2,  0,   0),
+	F(12000000, gpll0,  5,  1,  10),
 	F(16000000, gpll0,  1,  2,  75),
 	F(19200000,   cxo,  1,  0,   0),
 	F(24000000, gpll0,  5,  1,   5),
@@ -4398,6 +4415,70 @@ static struct branch_clk gcc_lpass_q6_axi_clk = {
 	},
 };
 
+static struct clk_freq_tbl ftbl_audio_core_lpaif_clock[] = {
+	F_LPASS(  512000, lpapll0, 16, 1, 60),
+	F_LPASS(  768000, lpapll0, 16, 1, 40),
+	F_LPASS( 1024000, lpapll0, 16, 1, 30),
+	F_LPASS( 1536000, lpapll0, 16, 1, 20),
+	F_LPASS( 2048000, lpapll0, 16, 1, 15),
+	F_LPASS( 3072000, lpapll0, 16, 1, 10),
+	F_LPASS( 4096000, lpapll0, 15, 1,  8),
+	F_LPASS( 6144000, lpapll0, 10, 1,  8),
+	F_LPASS( 8192000, lpapll0, 15, 1,  4),
+	F_LPASS(12288000, lpapll0, 10, 1,  4),
+	F_END
+};
+
+static struct rcg_clk audio_core_lpaif_sec_clk_src = {
+	.cmd_rcgr_reg = LPAIF_SEC_CMD_RCGR,
+	.set_rate = set_rate_mnd,
+	.freq_tbl = ftbl_audio_core_lpaif_clock,
+	.current_freq = &rcg_dummy_freq,
+	.base = &virt_bases[LPASS_BASE],
+	.c = {
+		.dbg_name = "audio_core_lpaif_sec_clk_src",
+		.ops = &clk_ops_rcg_mnd,
+		VDD_DIG_FMAX_MAP2(LOW, 12000000, NOMINAL, 25000000),
+		CLK_INIT(audio_core_lpaif_sec_clk_src.c),
+	},
+};
+
+static struct branch_clk audio_core_lpaif_sec_osr_clk = {
+	.cbcr_reg = AUDIO_CORE_LPAIF_SEC_OSR_CBCR,
+	.has_sibling = 1,
+	.base = &virt_bases[LPASS_BASE],
+	.c = {
+		.parent = &audio_core_lpaif_sec_clk_src.c,
+		.dbg_name = "audio_core_lpaif_sec_osr_clk",
+		.ops = &clk_ops_branch,
+		CLK_INIT(audio_core_lpaif_sec_osr_clk.c),
+	},
+};
+
+static struct branch_clk audio_core_lpaif_sec_ebit_clk = {
+	.cbcr_reg = AUDIO_CORE_LPAIF_SEC_EBIT_CBCR,
+	.has_sibling = 1,
+	.base = &virt_bases[LPASS_BASE],
+	.c = {
+		.dbg_name = "audio_core_lpaif_sec_ebit_clk",
+		.ops = &clk_ops_branch,
+		CLK_INIT(audio_core_lpaif_sec_ebit_clk.c),
+	},
+};
+
+static struct branch_clk audio_core_lpaif_sec_ibit_clk = {
+	.cbcr_reg = AUDIO_CORE_LPAIF_SEC_IBIT_CBCR,
+	.has_sibling = 1,
+	.max_div = 15,
+	.base = &virt_bases[LPASS_BASE],
+	.c = {
+		.parent = &audio_core_lpaif_sec_clk_src.c,
+		.dbg_name = "audio_core_lpaif_sec_ibit_clk",
+		.ops = &clk_ops_branch,
+		CLK_INIT(audio_core_lpaif_sec_ibit_clk.c),
+	},
+};
+
 static struct branch_clk q6ss_xo_clk = {
 	.cbcr_reg = LPASS_Q6SS_XO_CBCR,
 	.bcr_reg = LPASS_Q6SS_BCR,
@@ -4912,6 +4993,11 @@ static struct clk_lookup msm_clocks_8974_common[] __initdata = {
 	CLK_LOOKUP("xo",        cxo_lpm_clk.c,        "fc4281d0.qcom,mpm"),
 	CLK_LOOKUP("ref_clk",  cxo_d1_a_pin.c,                   "3-000e"),
 	CLK_LOOKUP("ref_clk_rf", cxo_a2_a_pin.c,                 "3-000e"),
+
+	CLK_LOOKUP("core_clk", audio_core_lpaif_sec_clk_src.c, "msm-dai-q6-mi2s.1"),
+	CLK_LOOKUP("osr_clk", audio_core_lpaif_sec_osr_clk.c, "msm-dai-q6-mi2s.1"),
+	CLK_LOOKUP("ebit_clk", audio_core_lpaif_sec_ebit_clk.c, "msm-dai-q6-mi2s.1"),
+	CLK_LOOKUP("ibit_clk", audio_core_lpaif_sec_ibit_clk.c, "msm-dai-q6-mi2s.1"),
 	CLK_LOOKUP("measure",	measure_clk.c,	"debug"),
 
 	CLK_LOOKUP("hfpll_src", cxo_a_clk_src.c,   "f9016000.qcom,clock-krait"),

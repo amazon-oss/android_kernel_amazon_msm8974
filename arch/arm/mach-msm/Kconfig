@@ -1134,6 +1134,12 @@ config MACH_FSM9XXX_SURF
 	  chipset based SURF evaluation board and
 	  FFA board.
 
+config MACH_URSA
+	depends on ARCH_MSM8974
+	bool "MSM8974 URSA"
+	help
+	  Support for the Amazon MSM8974-based Ursa board.
+
 endmenu
 
 config MSM_STACKED_MEMORY
