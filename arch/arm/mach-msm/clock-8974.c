@@ -4981,6 +4981,13 @@ static struct clk_lookup msm_clocks_8974_only[] __initdata = {
 	CLK_LOOKUP("cam_clk", gcc_gp1_clk.c, "2.qcom,camera"),
 };
 
+static struct clk_lookup msm_clocks_kodiak_only[] __initdata = {
+	CLK_LOOKUP("cam_src_clk", mmss_gp0_clk_src.c, "0.qcom,camera"),
+	CLK_LOOKUP("cam_src_clk", mmss_gp0_clk_src.c, "2.qcom,camera"),
+	CLK_LOOKUP("cam_clk", camss_gp0_clk.c, "0.qcom,camera"),
+	CLK_LOOKUP("cam_clk", camss_gp0_clk.c, "2.qcom,camera"),
+};
+
 static struct clk_lookup msm_clocks_8974_common[] __initdata = {
 	CLK_LOOKUP("xo",        cxo_otg_clk.c,                  "msm_otg"),
 	CLK_LOOKUP("xo",  cxo_pil_lpass_clk.c,      "fe200000.qcom,lpass"),
@@ -4993,6 +5000,7 @@ static struct clk_lookup msm_clocks_8974_common[] __initdata = {
 	CLK_LOOKUP("xo",        cxo_lpm_clk.c,        "fc4281d0.qcom,mpm"),
 	CLK_LOOKUP("ref_clk",  cxo_d1_a_pin.c,                   "3-000e"),
 	CLK_LOOKUP("ref_clk_rf", cxo_a2_a_pin.c,                 "3-000e"),
+	CLK_LOOKUP("ref_clk",          cxo_a2.c,                 "6-0028"),
 
 	CLK_LOOKUP("core_clk", audio_core_lpaif_sec_clk_src.c, "msm-dai-q6-mi2s.1"),
 	CLK_LOOKUP("osr_clk", audio_core_lpaif_sec_osr_clk.c, "msm-dai-q6-mi2s.1"),
@@ -5015,7 +5023,8 @@ static struct clk_lookup msm_clocks_8974_common[] __initdata = {
 	CLK_LOOKUP("core_clk", gcc_blsp1_qup2_spi_apps_clk.c, ""),
 	CLK_LOOKUP("core_clk", gcc_blsp1_qup1_spi_apps_clk.c, "f9923000.spi"),
 	CLK_LOOKUP("iface_clk", gcc_blsp1_ahb_clk.c, "f9923000.spi"),
-	CLK_LOOKUP("core_clk", gcc_blsp1_qup3_i2c_apps_clk.c, ""),
+	CLK_LOOKUP("core_clk", gcc_blsp1_qup3_i2c_apps_clk.c, "f9925000.i2c"),
+	CLK_LOOKUP("iface_clk", gcc_blsp1_ahb_clk.c, "f9925000.i2c"),
 	CLK_LOOKUP("core_clk", gcc_blsp1_qup3_spi_apps_clk.c, ""),
 	CLK_LOOKUP("core_clk", gcc_blsp1_qup4_i2c_apps_clk.c, ""),
 	CLK_LOOKUP("core_clk", gcc_blsp1_qup4_spi_apps_clk.c, ""),
@@ -5040,7 +5049,8 @@ static struct clk_lookup msm_clocks_8974_common[] __initdata = {
 	CLK_LOOKUP("iface_clk", gcc_blsp2_ahb_clk.c, "f995d000.uart"),
 	CLK_LOOKUP("core_clk", gcc_blsp2_qup1_i2c_apps_clk.c, ""),
 	CLK_LOOKUP("core_clk", gcc_blsp2_qup1_spi_apps_clk.c, ""),
-	CLK_LOOKUP("core_clk", gcc_blsp2_qup2_i2c_apps_clk.c, ""),
+	CLK_LOOKUP("core_clk", gcc_blsp2_qup2_i2c_apps_clk.c, "f9964000.i2c"),
+	CLK_LOOKUP("iface_clk", gcc_blsp2_ahb_clk.c, "f9964000.i2c"),
 	CLK_LOOKUP("core_clk", gcc_blsp2_qup2_spi_apps_clk.c, ""),
 	CLK_LOOKUP("core_clk", gcc_blsp2_qup3_i2c_apps_clk.c, ""),
 	CLK_LOOKUP("core_clk", gcc_blsp2_qup3_spi_apps_clk.c, ""),
@@ -5949,7 +5959,12 @@ static void __init msm8974_clock_pre_init(void)
 		msm8974_pro_clock_override();
 
 	/* version specific lookup table changes */
-	if (cpu_is_msm8974()) {
+	if (of_machine_is_compatible("lab126,ursa")) {
+		memcpy(msm_clocks_8974 + ARRAY_SIZE(msm_clocks_8974_common),
+		       msm_clocks_kodiak_only, sizeof(msm_clocks_kodiak_only));
+		msm8974_clock_init_data.size +=
+			ARRAY_SIZE(msm_clocks_kodiak_only);
+	} else if (cpu_is_msm8974()) {
 		memcpy(msm_clocks_8974 + ARRAY_SIZE(msm_clocks_8974_common),
 		       msm_clocks_8974_only, sizeof(msm_clocks_8974_only));
 		msm8974_clock_init_data.size +=
