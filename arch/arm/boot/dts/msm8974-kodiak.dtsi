@@ -452,6 +452,7 @@
 };
 
 &usb3 {
+	interrupts = <0>;
 	qcom,otg-capability;
 	qcom,dwc-hsphy-init = <0x00d19564>;
 
